@@ -1,71 +1,82 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Обновление пакетов
-sudo apt update && sudo apt upgrade -y
-sudo apt install -y wget software-properties-common apt-transport-https gnupg2
+# -------------------------------------------------
+# 1. Обновление пакетов и установка зависимостей
+# -------------------------------------------------
+sudo apt update
+sudo apt install -y wget tar gnupg2 software-properties-common
 
-# Установка и настройка Prometheus
-echo "Установка Prometheus..."
+# -------------------------------------------------
+# 2. Установка Prometheus
+# -------------------------------------------------
+PROM_VERSION="2.53.0"                     # актуальная версия на момент написания
+PROM_URL="https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/prometheus-${PROM_VERSION}.linux-amd64.tar.gz"
 
-# Получение последней версии Prometheus
-PROMETHEUS_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')
-wget https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
-tar xvf prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
-cd prometheus-${PROMETHEUS_VERSION}.linux-amd64/
+# Скачивание и распаковка
+wget -qO- "$PROM_URL" | sudo tar -xz -C /opt
+sudo mv /opt/prometheus-${PROM_VERSION}.linux-amd64 /opt/prometheus
 
-# Перемещение файлов
-sudo mv prometheus /usr/local/bin/
-sudo mv promtool /usr/local/bin/
-sudo mv consoles /etc/prometheus/
-sudo mv console_libraries /etc/prometheus/
+# Создание пользователя и группы
+sudo useradd --no-create-home --shell /usr/sbin/nologin prometheus
 
-# Создание конфигурационного файла
-sudo bash -c 'cat <<EOF > /etc/prometheus/prometheus.yml
-global:
-  scrape_interval: 15s
+# Настройка каталогов
+sudo mkdir -p /etc/prometheus /var/lib/prometheus
+sudo cp /opt/prometheus/prometheus.yml /etc/prometheus/
+sudo cp -r /opt/prometheus/consoles /opt/prometheus/console_libraries /etc/prometheus/
+sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus /opt/prometheus
 
-scrape_configs:
-  - job_name: "prometheus"
-    static_configs:
-      - targets: ["localhost:9090"]
-EOF'
-
-# Создание системного юнита для Prometheus
-sudo bash -c 'cat <<EOF > /etc/systemd/system/prometheus.service
+# Systemd‑служба
+cat <<'EOF' | sudo tee /etc/systemd/system/prometheus.service > /dev/null
 [Unit]
-Description=Prometheus Service
-After=network.target
+Description=Prometheus Monitoring
+Wants=network-online.target
+After=network-online.target
 
 [Service]
-User=root
-Group=root
-ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml
+User=prometheus
+Group=prometheus
+Type=simple
+ExecStart=/opt/prometheus/prometheus \
+  --config.file=/etc/prometheus/prometheus.yml \
+  --storage.tsdb.path=/var/lib/prometheus \
+  --web.console.templates=/etc/prometheus/consoles \
+  --web.console.libraries=/etc/prometheus/console_libraries
 
 [Install]
 WantedBy=multi-user.target
-EOF'
+EOF
 
-# Запуск Prometheus
+# Запуск и включение
 sudo systemctl daemon-reload
-sudo systemctl start prometheus
-sudo systemctl enable prometheus
+sudo systemctl enable --now prometheus
 
-# Установка и настройка Grafana
-echo "Установка Grafana..."
+# -------------------------------------------------
+# 3. Установка Grafana
+# -------------------------------------------------
+# Добавляем репозиторий Grafana
+sudo apt install -y apt-transport-https
+wget -qO- https://apt.grafana.com/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/grafana.gpg
+echo "deb [signed-by=/usr/share/keyrings/grafana.gpg] https://apt.grafana.com stable main" | \
+  sudo tee /etc/apt/sources.list.d/grafana.list
 
-# Добавление ключа репозитория Grafana
-wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-echo "deb https://packages.grafana.com/oss/release/deb stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
-
-# Установка Grafana
 sudo apt update
 sudo apt install -y grafana
 
-# Запуск Grafana
-sudo systemctl start grafana
-sudo systemctl enable grafana
+# Включаем и стартуем сервис
+sudo systemctl enable --now grafana-server
 
-# Вывод информации
-echo "Prometheus доступен по адресу http://localhost:9090"
-echo "Grafana доступна по адресу http://localhost:3000"
-echo "Пользователь по умолчанию: admin, пароль: admin"
+# -------------------------------------------------
+# 4. Открытие портов в firewall (если используется ufw)
+# -------------------------------------------------
+if command -v ufw >/dev/null; then
+    sudo ufw allow 9090/tcp   # Prometheus
+    sudo ufw allow 3000/tcp   # Grafana
+fi
+
+# -------------------------------------------------
+# 5. Проверка статуса
+# -------------------------------------------------
+echo "=== Установка завершена ==="
+echo "Prometheus доступен по http://<your_ip>:9090"
+echo "Grafana доступна по http://<your_ip>:3000 (логин: admin, пароль: admin)"
