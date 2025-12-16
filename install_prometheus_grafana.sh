@@ -2,12 +2,12 @@
 
 # Обновление пакетов
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y wget software-properties-common
+sudo apt install -y wget software-properties-common apt-transport-https gnupg2
 
 # Установка и настройка Prometheus
 echo "Установка Prometheus..."
 
-# Загрузка последней версии Prometheus
+# Получение последней версии Prometheus
 PROMETHEUS_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep -Po '"tag_name": "\K.*?(?=")')
 wget https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
 tar xvf prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz
@@ -53,8 +53,7 @@ sudo systemctl enable prometheus
 # Установка и настройка Grafana
 echo "Установка Grafana..."
 
-# Добавление репозитория Grafana
-sudo apt-get install -y apt-transport-https
+# Добавление ключа репозитория Grafana
 wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
 echo "deb https://packages.grafana.com/oss/release/deb stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
 
@@ -63,11 +62,10 @@ sudo apt update
 sudo apt install -y grafana
 
 # Запуск Grafana
-sudo systemctl start grafana-server
-sudo systemctl enable grafana-server
+sudo systemctl start grafana
+sudo systemctl enable grafana
 
 # Вывод информации
 echo "Prometheus доступен по адресу http://localhost:9090"
 echo "Grafana доступна по адресу http://localhost:3000"
 echo "Пользователь по умолчанию: admin, пароль: admin"
-
